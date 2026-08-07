@@ -15,12 +15,22 @@ smoke:            ## 5-minute end-to-end check on CPU
 	             generator_kwargs.steps=25 fixation.n_dir=2 fixation.k=2
 	python scripts/make_tables.py --exp e1_main
 
-e1: ; python scripts/run_experiment.py --exp e1_main
-e2: ; python scripts/run_experiment.py --exp e2_jitter
-e3: ; python scripts/run_experiment.py --exp e3_heldout
-e4: ; python scripts/run_experiment.py --exp e4_controls
-e5: ; python scripts/run_experiment.py --exp e5_terms
-e7: ; python scripts/run_experiment.py --exp e7_prior_cost
+# GPU profile applied to every experiment. Edit configs/gpu.yaml, not these.
+GPU = --override device=cuda image_size=256 \
+      fixation.k=2 fixation.n_dir=4 \
+      generator=sdxl generator_kwargs.steps=50 generator_kwargs.guide_every=2 \
+      loop_reader=dual_channel "eval_readers=['searaft','prednet']"
+
+e1: ; python scripts/run_experiment.py --exp e1_main        $(GPU)
+e2: ; python scripts/run_experiment.py --exp e2_jitter      $(GPU)
+e3: ; python scripts/run_experiment.py --exp e3_heldout     $(GPU)
+e4: ; python scripts/run_experiment.py --exp e4_controls    $(GPU)
+e5: ; python scripts/run_experiment.py --exp e5_terms       $(GPU)
+e7: ; python scripts/run_experiment.py --exp e7_prior_cost  $(GPU)
+
+cost:             ## print a runtime estimate before committing to a sweep
+	python -c "from driftdream.perf import estimate_runtime as e; \
+	  print('per image:', e(256, 50, 4, 2, 2, 'cuda'))"
 
 tables:
 	for e in e1_main e2_jitter e3_heldout e4_controls e5_terms e7_prior_cost; do \
