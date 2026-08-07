@@ -119,10 +119,37 @@ only place to edit.
 
 ## Running the experiments
 
+**The CPU path is a smoke test only.** The jitter ensemble is `n_dir x (k-1)`
+reader calls per optimisation step, so a full sweep on CPU takes months. Every
+sweep now prints a runtime estimate before it starts and warns if the numbers
+do not add up. Check first:
+
+```bash
+make cost                          # per-image estimate under the GPU profile
+python scripts/run_experiment.py --exp e1_main --dry-run
+```
+
+Then:
+
 ```bash
 ./run_all.sh --smoke     # ~10 min, CPU, proves the plumbing
-./run_all.sh             # full suite (GPU)
+make e2 e1 e3 e4 e5 e7   # GPU profile (see configs/gpu.yaml)
 ```
+
+### Two settings the day-1 gate decides for you
+
+**Guidance stage.** Gate C2 reports whether the illusion survives at 64px. It
+does not: measured rho is `-0.006` at 64px against `+0.100` at 192px. A
+repeating element needs enough pixels to hold four distinguishable luminance
+steps, and at 64px it does not have them. DeepFloyd IF stage I generates at
+64x64, so guiding there gives the reader nothing to read and the gradient is
+noise. Use `generator=sdxl`, or `deepfloyd` with `stage=sr1`. Keep
+`image_size >= 192` for the objective; 128px is already half strength.
+
+**Ensemble size.** `n_dir=8, k=4` is 24 clips per loss call. `n_dir=4, k=2` is
+4, and was enough for a clean sign-reversing signal in the gate. Run
+`e2_jitter` first and let it decide, rather than paying 6x for every other
+experiment on an assumption.
 
 Or individually:
 
