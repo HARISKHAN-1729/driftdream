@@ -1,0 +1,619 @@
+% ===========================================================================
+% DriftDream -- Introduction, Related Work, Method
+% Drop-in sections. Replace the preamble with the track template when
+% submitting; nothing below \begin{document} depends on the class.
+% ===========================================================================
+\documentclass[10pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
+\usepackage[T1]{fontenc}
+\usepackage[expansion=false]{microtype}
+\usepackage[round,authoryear]{natbib}
+
+% --- notation --------------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bp}{\mathbf{p}}
+\newcommand{\bc}{\mathbf{c}}
+\newcommand{\bd}{\boldsymbol{\delta}}
+\newcommand{\bn}{\mathbf{n}}
+\newcommand{\bu}{\mathbf{u}}
+\newcommand{\bv}{\mathbf{v}}
+\newcommand{\bF}{\mathbf{F}}
+\newcommand{\bff}{\mathbf{f}}
+\newcommand{\bA}{\mathbf{A}}
+\newcommand{\bb}{\mathbf{b}}
+\newcommand{\W}{\mathcal{W}}
+\newcommand{\Loss}{\mathcal{L}}
+\newcommand{\Om}{\Omega}
+
+\title{DriftDream: Training-Free Generation of Static Images\\
+       with a Prescribed Illusory-Motion Field}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+
+A still image can look like it is moving. Patterns in the peripheral drift
+family, of which Kitaoka's \emph{Rotating Snakes} is the best known example,
+are printed on paper and do not change, yet most viewers see the rings turn
+\cite{faubert1999peripheral,kitaoka2003snakes}. The effect comes from repeating
+elements whose luminances follow an asymmetric order, together with the small
+involuntary eye movements that occur during fixation. Elements at different
+luminances are registered by the visual system at slightly different times, and
+a motion detector reads that timing difference as movement
+\cite{conway2005neural,backus2005illusory}. The percept is stronger in
+observers whose fixation is less stable, which ties it directly to eye
+movements rather than to the image alone \cite{murakami2006fixation}.
+
+Recent work has shown that a frozen text-to-image diffusion model can be made
+to produce illusions without any training, by splitting the denoising signal
+along an axis on which one canvas can satisfy two descriptions at once. Visual
+Anagrams uses pixel permutations, so the image shows one thing upright and
+another when flipped or rotated \cite{geng2024anagrams}. Factorized Diffusion
+splits by spatial frequency, giving hybrid images in the sense of
+\citet{oliva2006hybrid} \cite{geng2024factorized}. Images that Sound splits
+across modality, so a single canvas is both a picture and an audio spectrogram
+\cite{chen2024imagesthatsound}.
+
+Every one of these axes is instantaneous. The image is read once, and the two
+readings are of the same frozen array of pixels. Motion is not on the list, and
+the reason is not that nobody thought of it. It is that the obvious way to
+write the objective does not work.
+
+\paragraph{Why the obvious objective is empty.}
+Suppose we want a still image whose perceived motion matches a target field
+$\bF^\ast$, and we have a differentiable optical-flow model $M$. The natural
+loss is to read the flow of the image and compare it to $\bF^\ast$. But a still
+image has no flow. Feed $M$ the same frame twice and it returns approximately
+zero everywhere, for every image, so the loss is constant and its gradient is
+zero. There is nothing to descend. The illusion we are trying to create does
+not live in a single frame; it appears only when the image moves slightly on
+the retina.
+
+\paragraph{What we do instead.}
+We put the eye movements into the objective. At each optimisation step we take
+the current image, apply a small set of rigid shifts that stand in for
+microsaccades, read the flow between consecutive shifted frames, remove the
+part of that flow explained by the shift itself, and average what is left over
+several shift directions. The average residual is the illusory component. We
+compare it to $\bF^\ast$ with a normalised correlation and use the result as a
+guidance term on a frozen generator. We call this \emph{jitter-ensemble motion
+guidance}. It is the one new piece of machinery in the paper, and it is what
+turns an empty objective into a signal that can be followed.
+
+Two properties follow from the construction rather than from tuning. The
+residual is signed, so asking for clockwise and asking for anticlockwise give
+different images rather than the same image twice. And it is defined per pixel,
+so the target can be localised: rotation inside one ring, or drift confined to
+the shape of a letter while the surround stays still.
+
+\paragraph{What we do not do.}
+No network is trained, fine-tuned, or adapted. Every model in the pipeline is
+frozen and used only in the forward and backward pass. The optimised variables
+are the image (or the diffusion latent), nothing else.
+
+\paragraph{Why the evaluation is the hard part.}
+A model that scores an image is also a model that can be fooled. Optimising
+pixels against a flow network is close to the setting in which adversarial
+examples are found, and an image that drives $M$ to any chosen output need not
+look like it moves to a person. This concern is not hypothetical for this
+particular percept. \citet{rosario2026illusory} tested a range of flow models
+on Rotating Snakes and found that most produce flow fields that do not match
+what people report; only a model built to mirror the V1--MT pathway
+\cite{sun2025multiorder} showed the expected rotation, and only when the
+stimulus was jittered to imitate eye movements. On the predictive-coding side,
+\citet{watanabe2018prednet} reported that a PredNet trained only to predict the
+next frame reproduces the illusion, but \citet{kirubeswaran2023inconsistent}
+retrained the same architecture ten times and found the behaviour came and went
+across runs, and never appeared for greyscale versions that people still see.
+
+We therefore separate the model that is optimised from the models that judge.
+Guidance uses one reader. Reporting uses readers that never appear in any
+gradient, plus a two-alternative forced-choice study in which people report
+only the direction they see. We also require a negative control: a transform
+that destroys the percept for human viewers must drive the measured correlation
+to zero. Building that control turned out to be less obvious than expected, and
+we describe in Section~\ref{sec:controls} why the first version we tried made
+the score go up rather than down.
+
+\paragraph{Contributions.}
+\begin{enumerate}\itemsep2pt
+\item A training-free method that generates a still image whose \emph{perceived}
+      motion follows a field the user specifies, including its direction and
+      where in the frame it appears. Prior illusion work with diffusion priors
+      is instantaneous; prior work on generating motion illusions
+      \cite{sinapayen2021eigen} controls neither content nor direction.
+\item Jitter-ensemble motion guidance: an objective defined on the residual
+      flow averaged over simulated microsaccades in several directions. We show
+      the ensemble is required, not cosmetic --- with zero jitter the measured
+      correlation is zero by construction, and with one direction it is
+      dominated by reader artefacts.
+\item An evaluation protocol built around held-out readers, a signed control
+      (asking for the opposite direction must reverse the measurement), and a
+      negative control that must collapse the score. We report a case in which
+      an intuitive control fails, and what replaces it.
+\end{enumerate}
+
+% ===========================================================================
+\section{Related Work}
+% ===========================================================================
+
+\subsection{Illusions from frozen diffusion models}
+
+\citet{geng2024anagrams} generate multi-view illusions by estimating noise from
+several transformed views of the same noisy image and averaging the estimates
+before each reverse step. Their analysis shows the argument holds when the
+views are orthogonal transformations, which covers flips, rotations by
+multiples of $90^\circ$, colour inversion, and jigsaw permutations.
+\citet{geng2024factorized} replace the transformation with a decomposition of
+the noise into frequency bands, recovering hybrid images
+\cite{oliva2006hybrid} and related effects. \citet{chen2024imagesthatsound}
+denoise one canvas under an image model and an audio-spectrogram model at the
+same time, so the result can be viewed and played.
+
+These share a structure: a fixed decomposition of the canvas, and two or more
+conditions imposed on the parts. Our objective is not a decomposition. There is
+no second prompt and no second view. There is one image, and a measurement made
+on it by a model that is shown the image in motion. The quantity being
+controlled is not what the image depicts under a transformation but what
+happens in an observer when the image is held still.
+
+\subsection{Guidance and search at inference time}
+
+Classifier guidance \cite{dhariwal2021guidance} and classifier-free guidance
+\cite{ho2022cfg} established that the sampling trajectory can be pushed toward
+an objective without retraining. Universal guidance \cite{bansal2023universal}
+and self-guidance \cite{epstein2023selfguidance} extend this to arbitrary
+off-the-shelf networks and to the model's own internal activations. We follow
+the same recipe: differentiate a loss computed on the current estimate of the
+clean image and add the gradient to the state.
+
+Closest in mechanism is Motion Guidance \cite{geng2024motionguidance}, which
+backpropagates through a frozen flow network \cite{teed2020raft} to move
+content in an edit. The distinction matters and is easy to blur. Their target
+displacement is measured between two \emph{different} images, a source and an
+output, and the content really does move. Ours is measured between an image and
+a shifted copy of \emph{itself}, and nothing moves; what changes is what a
+motion model reports. Applying their objective to a single still frame reduces
+exactly to our zero-jitter ablation, which is why we report that ablation
+instead of implementing a separate baseline.
+
+When gradients are unavailable or badly behaved, one can search instead.
+\citet{ma2025inferencescaling} search over initial noises using a verifier, and
+\citet{singhal2025fk} use interacting-particle Feynman--Kac methods to steer
+sampling with an arbitrary reward. Both apply to our objective without change,
+since it is a scalar score, and we keep them as a fallback path.
+
+\subsection{Peripheral drift and its explanations}
+
+\citet{faubert1999peripheral} described the peripheral drift illusion, and
+\citet{kitaoka2003snakes} characterised the Rotating Snakes variant, in which
+motion is perceived following the repeating order black, dark, white, light.
+\citet{conway2005neural} showed the effect survives when colour is removed, so
+the critical variable is the luminance relation of neighbouring elements, and
+recorded direction-selective cells in macaque V1 and MT that respond
+directionally to static element pairs. They report that high-contrast elements
+(black and white, relative to the mean) reach peak response 10--20\,ms earlier
+than the intermediate greys, which supplies the timing difference a motion
+detector needs. \citet{backus2005illusory} give an account in terms of the
+time course of responses to contrast and luminance, and
+\citet{fermuller2010causal} attribute the effect to causal temporal filtering.
+\citet{murakami2006fixation} found that observers with less stable fixation
+report stronger illusory motion, which is the empirical basis for building eye
+movements into our objective rather than treating them as noise.
+
+\subsection{Models that do or do not reproduce the illusion}
+
+\citet{watanabe2018prednet} showed that a PredNet \cite{lotter2017prednet}
+trained for next-frame prediction produces rotational flow on Rotating Snakes.
+\citet{kirubeswaran2023inconsistent} retrained the architecture from ten
+different initialisations and found the behaviour was not reliable across runs,
+and that no instance produced rotation for greyscale variants that people do
+see. \citet{sun2025multiorder} build a model of the V1--MT pathway with a
+trainable motion-energy stage and a recurrent attention stage, extending an
+earlier version \cite{sun2023motionenergy}. \citet{rosario2026illusory} compare
+several flow models on Rotating Snakes and find that most fail; the
+dual-channel model of \citet{sun2025multiorder} shows the expected rotation,
+most clearly under simulated saccades. They also note that all models tested
+lack any mechanism for peripheral vision, while the human effect is stronger
+away from the fovea.
+
+We take two things from this line of work and one warning. We take the
+simulated-saccade protocol and the normalised flow correlation as our
+measurement, and the target field of \citet{rosario2026illusory} as our
+default $\bF^\ast$ (Section~\ref{sec:target}). The warning is that no single
+reader can carry the claim, which is why our reporting is cross-model.
+
+\subsection{Generating motion illusions}
+
+\citet{sinapayen2021eigen} search for motion illusions with an evolutionary
+algorithm, scoring candidates with a PredNet, and confirm with a survey that
+the results work on people. That is the closest existing system, and the
+differences are in what can be asked for. Their search has no content term, so
+outputs are abstract repeating patterns rather than pictures of anything; it
+scores an image with a scalar, so there is no way to ask for a particular
+direction or to place the effect in a chosen region; and it is gradient-free
+evolution over a pattern-generating network rather than guidance of a
+generative prior. Our objective is a per-pixel signed field, which is what
+makes direction and layout controllable, and it attaches to a diffusion model,
+which is what lets the image also be a picture.
+
+Relatedly, \citet{gomezvilla2019deceived} showed that convolutional networks
+can be fooled by classical illusions, and \citet{poole2023dreamfusion}
+popularised the pattern of optimising a signal through a frozen model, which we
+use in a different setting.
+
+% ===========================================================================
+\section{Method}
+% ===========================================================================
+
+\subsection{Overview and notation}
+
+The input is a target motion field $\bF^\ast:\Om\to\R^2$ defined on a support
+mask $\Om\subseteq\{1..H\}\times\{1..W\}$, an optional text prompt, and a frozen
+generator. The output is an image $\bx\in[0,1]^{3\times H\times W}$.
+
+Write $\bp=(p_x,p_y)$ for a pixel with $p_y$ increasing downwards, matching
+image row order. A flow field $\bff\in\R^{2\times H\times W}$ has $\bff_1$ the
+horizontal and $\bff_2$ the vertical component, again with positive meaning
+downwards. A reader $M$ maps a stack of frames to one flow field. We use
+$m(\bp)\in[0,1]$ for the soft mask.
+
+The pipeline has four parts, described in turn: the target field
+(\S\ref{sec:target}), the simulated fixation (\S\ref{sec:fixation}), the
+residual flow that forms the signal (\S\ref{sec:residual}), and the loss and
+guidance step (\S\ref{sec:loss}). Section~\ref{sec:reader} describes the reader
+we supply so that the method runs without any gated download, and
+Section~\ref{sec:controls} the controls.
+
+\subsection{Target field}
+\label{sec:target}
+
+For rotation we use the field of \citet{rosario2026illusory}, who introduced it
+to score models against the human percept of Rotating Snakes. With centre $\bc$,
+outer radius $R$, radial exponent $\gamma$, and $r=\lVert\bp-\bc\rVert$, the
+unit tangent and the field are
+\begin{equation}
+\bu(\bp)=\frac{1}{r}\begin{pmatrix}-(p_y-c_y)\\ p_x-c_x\end{pmatrix},
+\qquad
+\tilde\bF(\bp)=\omega\left(\frac{r}{R}\right)^{\!\gamma}\bu(\bp)\, m(\bp).
+\label{eq:rotation}
+\end{equation}
+The sign $\omega=\pm1$ selects the direction and $\gamma=1$ gives the linear
+radial profile of rigid rotation, avoiding a magnitude discontinuity at the
+outer edge. A check on the convention: at the top of the circle
+$p_y<c_y$ and $p_x=c_x$, so $\bu=(1,0)$; with $p_y$ downwards, motion to the
+right at the top of a circle is clockwise, so $\omega=+1$ means clockwise on
+screen.
+
+Radial expansion replaces $\bu$ with the outward unit radial vector, and
+laminar drift replaces it with a constant unit vector inside a stencil,
+allowing targets such as ``this word drifts left while the background is
+still''.
+
+The field is normalised over the mask,
+\begin{equation}
+\bF^\ast=\tilde\bF\,\big/\,\lVert\tilde\bF\rVert_{\Om},
+\qquad
+\lVert\bff\rVert_{\Om}^2=\sum_{\bp}m(\bp)^2\lVert\bff(\bp)\rVert^2 ,
+\label{eq:normalise}
+\end{equation}
+because the score in \eqref{eq:rho} is scale invariant: only direction and
+relative magnitude are being asked for, not a speed in pixels per second, which
+a still image does not have.
+
+\subsection{Simulated fixation}
+\label{sec:fixation}
+
+Let $\W_{\bd}$ be a translation by $\bd\in\R^2$ implemented by bilinear
+sampling,
+\begin{equation}
+(\W_{\bd}\bx)(\bp)=\bx(\bp-\bd),
+\label{eq:warp}
+\end{equation}
+so image content moves by $+\bd$. Sampling outside the frame uses reflection
+padding; zero padding puts a hard edge at the border and the reader reports
+large spurious flow there. $\W_{\bd}$ is differentiable in $\bx$, which is what
+lets gradients pass from the reader back to the image.
+
+A fixation clip is a sequence of cumulative offsets
+$\bd_1=\mathbf 0,\bd_2,\dots,\bd_K$ along a straight path with step length
+$\Delta$. We use $J$ such paths with directions spread evenly over the circle,
+$\theta_j=2\pi j/J$. From \eqref{eq:warp}, the true flow from frame $i-1$ to
+frame $i$ of path $j$ is the constant field $\bd_{j,i}-\bd_{j,i-1}$.
+
+Using several directions is not a detail. With one direction the measurement is
+dominated by whatever that particular shift excites in the reader: on a fixed
+image we measured the score swinging between $+0.13$ and $-0.09$ across jitter
+seeds. Averaging over directions removes most of that, and it also removes an
+easy exploit, since structure tuned to one shift direction does not survive the
+average.
+
+\subsection{Residual flow}
+\label{sec:residual}
+
+The flow the reader returns is dominated by the shift we applied. The illusory
+part is what remains. Two ways to remove the shift are available and they do
+not behave the same.
+
+The direct choice subtracts the known offset,
+$\bff^{\text{res}}=M(\cdot)-(\bd_{j,i}-\bd_{j,i-1})$. This is only correct if
+the reader's gain is one. Real motion models under-report speed. On a smoothed
+random texture at $96\times96$, our built-in reader recovers a 2-pixel shift as
+$0.73$ pixels, a gain of $0.37$, so the subtraction leaves a residual
+proportional to the shift, pointing along the jitter, and far larger than the
+effect we are looking for: with $K=4$, $\Delta=5$ and a single direction, mean
+residual magnitude $4.95$ pixels.
+
+We instead remove the uniform component the reader actually reported, using the
+spatial median of each component,
+\begin{equation}
+\bff^{\text{res}}_{j,i}
+= M\!\left(\W_{\bd_{j,i-1}}\bx,\; \W_{\bd_{j,i}}\bx\right)
+- \operatorname{med}_{\bp}\,
+  M\!\left(\W_{\bd_{j,i-1}}\bx,\; \W_{\bd_{j,i}}\bx\right).
+\label{eq:residual}
+\end{equation}
+On the same test this leaves $0.33$ pixels, a factor of 15 smaller. The median
+is used rather than the mean so that a strong local response does not shift the
+estimate of the global component.
+
+There is also a perceptual reason to prefer \eqref{eq:residual}. A uniform
+translation of the whole retinal image is what an eye movement produces, and
+observers do not perceive it as object motion. What is perceived is the part of
+the field that departs from uniform. The cost is that a genuinely uniform
+illusory drift across the entire frame would be invisible to the measurement.
+Every target we use is spatially structured, so this does not bind, but a
+whole-frame constant target would need the direct subtraction instead.
+
+The ensemble average over frames and directions is
+\begin{equation}
+\bar\bff(\bx)=\frac{1}{J(K-1)}\sum_{j=1}^{J}\sum_{i=2}^{K}
+\bff^{\text{res}}_{j,i}.
+\label{eq:ensemble}
+\end{equation}
+When $K=1$ or $\Delta=0$ this is zero for every image, which is the empty
+objective from the introduction, and is the ablation reported in the
+experiments.
+
+One consequence of \eqref{eq:ensemble} is worth stating because it affects how
+the ablations should be read. When the $J$ directions are spread evenly, the
+offsets sum to approximately zero, so the gain error described above also
+cancels in the average. The direct subtraction and \eqref{eq:residual}
+therefore look similar once $J$ is large, and they differ sharply only at
+$J=1$. Diagnostics comparing the two must use a single direction or they
+measure nothing.
+
+\subsection{Score, loss, and guidance}
+\label{sec:loss}
+
+The score is the masked normalised correlation used by
+\citet{rosario2026illusory},
+\begin{equation}
+\rho(\bar\bff,\bF^\ast)=
+\frac{\sum_{\bp}m(\bp)^2\,\langle\bar\bff(\bp),\bF^\ast(\bp)\rangle}
+     {\lVert\bar\bff\rVert_{\Om}\;\lVert\bF^\ast\rVert_{\Om}+\varepsilon}
+\;\in[-1,1].
+\label{eq:rho}
+\end{equation}
+By Cauchy--Schwarz $\rho=1$ exactly when $\bar\bff\propto\bF^\ast$ with a
+positive constant on $\Om$; $\rho(\bF,-\bF)=-1$; and $\rho$ vanishes for fields
+orthogonal at every pixel, such as a rotation field against its own radial
+counterpart. We verified all three numerically to within $10^{-3}$.
+
+The full objective adds a content term and, for stencil targets, a quiet term,
+\begin{equation}
+\Loss(\bx)=
+\underbrace{\lambda_m\bigl(1-\rho(\bar\bff(\bx),\bF^\ast)\bigr)}_{\text{motion}}
++\underbrace{\lambda_c\bigl(1-\cos(E_I(\bx),E_T(\text{prompt}))\bigr)}_{\text{content}}
++\underbrace{\lambda_q\,Q(\bar\bff(\bx))}_{\text{quiet}},
+\label{eq:loss}
+\end{equation}
+where $E_I,E_T$ are frozen CLIP image and text encoders
+\cite{radford2021clip} and
+\begin{equation}
+Q(\bff)=\frac{\sum_{\bp}\bigl(1-m(\bp)\bigr)^{2}\lVert\bff(\bp)\rVert^{2}}
+              {2\sum_{\bp}\bigl(1-m(\bp)\bigr)+\varepsilon}
+\label{eq:quiet}
+\end{equation}
+penalises residual flow outside the support. Without $Q$ a stencil target tends
+to make the whole frame shimmer, and ``only the word moves'' is not legible.
+
+\paragraph{Guidance.} For a diffusion generator with noise prediction
+$\epsilon_\theta$ and cumulative noise schedule $\bar\alpha_t$, the current
+estimate of the clean image is the standard Tweedie form
+\begin{equation}
+\hat\bx_0(\bx_t,t)=
+\frac{\bx_t-\sqrt{1-\bar\alpha_t}\;\epsilon_\theta(\bx_t,t,c)}
+     {\sqrt{\bar\alpha_t}},
+\label{eq:tweedie}
+\end{equation}
+which follows from the forward process
+$\bx_t=\sqrt{\bar\alpha_t}\,\bx_0+\sqrt{1-\bar\alpha_t}\,\epsilon$
+\cite{ho2020ddpm}. We evaluate \eqref{eq:loss} at $\hat\bx_0$ and take a step
+against its gradient in the state, following
+\cite{dhariwal2021guidance,bansal2023universal},
+\begin{equation}
+\bx_t\;\leftarrow\;\bx_t-s_t\,\Pi_{\tau}\!\left[
+\nabla_{\bx_t}\Loss\bigl(\hat\bx_0(\bx_t,t)\bigr)\right],
+\label{eq:guidance}
+\end{equation}
+with $\Pi_\tau$ a norm clip at $\tau$ and $s_t$ a decaying scale. Gradients
+pass through the reader and the warps only; $\epsilon_\theta$ is treated as
+constant within the step, so no weights are touched and no graph is kept through
+the sampler. For a latent model the decoder sits between $\hat\bx_0$ and the
+loss and is likewise frozen and differentiated through
+\cite{rombach2022ldm,podell2024sdxl}. Guidance is applied on an interior window
+of steps: early states are too noisy for a motion reader to say anything useful,
+and late steps mainly add texture.
+
+\begin{algorithm}[t]
+\caption{Jitter-ensemble motion guidance (one sample)}
+\label{alg:main}
+\begin{algorithmic}[1]
+\Require target $\bF^\ast$, mask $m$, prompt $c$, frozen generator and reader
+         $M$, offsets $\{\bd_{j,i}\}$, weights $\lambda_m,\lambda_c,\lambda_q$
+\State $\bx_T\sim\mathcal N(\mathbf 0,\mathbf I)$
+\For{$t=T,\dots,1$}
+  \State $\hat\bx_0\gets$ Tweedie estimate \eqref{eq:tweedie}
+  \If{$t$ in guidance window}
+    \State $\bar\bff\gets$ ensemble residual \eqref{eq:residual}--\eqref{eq:ensemble}
+           evaluated at $\hat\bx_0$
+    \State $\Loss\gets\lambda_m(1-\rho(\bar\bff,\bF^\ast))
+            +\lambda_c\Loss_{\text{content}}+\lambda_q Q(\bar\bff)$
+    \State $\bx_t\gets\bx_t-s_t\,\Pi_\tau[\nabla_{\bx_t}\Loss]$
+  \EndIf
+  \State $\bx_{t-1}\gets\textsc{SamplerStep}(\bx_t,\epsilon_\theta,t)$
+\EndFor
+\State \Return $\bx_0$
+\end{algorithmic}
+\end{algorithm}
+
+Because \eqref{eq:loss} is a scalar function of the image, the same objective
+drives gradient-free optimisers when gradients are unavailable: best-of-$N$
+over initial noise \cite{ma2025inferencescaling}, or particle steering
+\cite{singhal2025fk}. Only the optimiser changes; the objective and the
+evaluation are the same.
+
+\subsection{A reader that needs no download}
+\label{sec:reader}
+
+Our in-loop reader is intended to be the dual-channel model of
+\citet{sun2025multiorder}, the one model reported by
+\citet{rosario2026illusory} to show the human direction under simulated
+saccades. Because its weights are gated and its gradient behaviour cannot be
+checked in advance, we also supply a small reader with no learned parameters,
+so the method is runnable and testable on its own. It has three stages.
+
+\paragraph{Latency.} Elements at different luminances are registered at
+slightly different times \cite{conway2005neural,backus2005illusory}, and a
+temporal filter of this kind is the mechanism proposed by
+\citet{fermuller2010causal}. We apply a one-tap temporal blend whose weight
+depends on local luminance $L$,
+\begin{equation}
+I^{\text{eff}}_t=(1-a)\,I_t+a\,I_{t-1},
+\qquad a=\gamma_{\text{lat}}\,(1-L),
+\label{eq:latency}
+\end{equation}
+so darker regions lag. This stage is necessary rather than decorative: with
+$\gamma_{\text{lat}}=0$ the reader measures $\rho=+0.012$ on a
+peripheral-drift pattern at $192\times192$, against $+0.100$ with
+$\gamma_{\text{lat}}=0.75$. Without it there is no illusion to detect.
+
+\paragraph{Quadrature filtering and phase velocity.} For orientation
+$\bn_\phi=(\cos\phi,\sin\phi)$ and spatial frequency $f$, we build a Gabor pair
+with a Gaussian envelope $g$,
+\begin{equation}
+G_e(\bu)=g(\bu)\cos\!\left(2\pi f\,\bu\!\cdot\!\bn_\phi\right),
+\qquad
+G_o(\bu)=g(\bu)\sin\!\left(2\pi f\,\bu\!\cdot\!\bn_\phi\right),
+\label{eq:gabor}
+\end{equation}
+each with its mean subtracted so a flat region gives no response. Writing
+$e_t,o_t$ for the responses and $\varphi_t=\operatorname{atan2}(o_t,e_t)$, the
+component velocity along $\bn_\phi$ follows the phase-based construction of
+\citet{fleet1990phase}. For a grating $I(\bp)=\cos(2\pi f\,\bp\!\cdot\!\bn_\phi)$
+shifted by $\bd$, equation \eqref{eq:warp} gives
+$I(\bp-\bd)=\cos(2\pi f\,\bp\!\cdot\!\bn_\phi-2\pi f\,\bd\!\cdot\!\bn_\phi)$,
+so the true phase changes by $-2\pi f(\bd\!\cdot\!\bn_\phi)$. The convolution in
+standard deep-learning libraries is cross-correlation, which negates the
+measured phase, and the recovered velocity is therefore
+\begin{equation}
+v_\phi=\frac{\Delta\varphi}{2\pi f},
+\qquad
+\Delta\varphi=\operatorname{atan2}\bigl(\sin(\varphi_1-\varphi_0),\,
+                                        \cos(\varphi_1-\varphi_0)\bigr),
+\label{eq:phase}
+\end{equation}
+with the $\operatorname{atan2}$ form wrapping the difference to $(-\pi,\pi]$
+differentiably. The sign in \eqref{eq:phase} is easy to get wrong, and getting
+it wrong reverses every result while leaving all of them plausible; we test it
+directly by shifting a texture by a known amount.
+
+\paragraph{Combination.} Each orientation constrains only the velocity
+component along $\bn_\phi$, the aperture problem. We combine the constraints by
+weighted least squares, with weights $w_\phi=A_0A_1$ given by the product of
+the quadrature amplitudes, and Tikhonov damping $\lambda$ so that untextured
+regions do not produce large velocities:
+\begin{equation}
+\bA=\sum_{\phi,f}w_\phi\,\bn_\phi\bn_\phi^{\!\top},
+\quad
+\bb=\sum_{\phi,f}w_\phi\,v_\phi\,\bn_\phi,
+\quad
+\bv=(\bA+\lambda\mathbf I)^{-1}\bb .
+\label{eq:lstsq}
+\end{equation}
+This is the standard intersection-of-constraints solution; the recurrent
+attention stage of \citet{sun2025multiorder} plays the corresponding role in
+the model we use when it is available.
+
+\paragraph{An honest gap.} Equation \eqref{eq:latency} makes lag decrease with
+luminance. \citet{conway2005neural} instead report that response latency
+depends on \emph{contrast relative to the mean}: black and white elements peak
+10--20\,ms before the intermediate greys. We implemented that version as well.
+It produces a stronger separation between a drift pattern and its
+luminance-reversed twin (0.28 against 0.20 in $\rho$), but with the opposite
+sign. We do not resolve which is right here; both are simplifications of a
+mechanism that is still debated
+\cite{conway2005neural,backus2005illusory,fermuller2010causal}. The practical
+consequence is that a reader's direction convention must be calibrated once
+against a stimulus whose human direction is known, and that no claim in this
+paper rests on a single reader. It is also the clearest argument we can give
+for the protocol in Section~\ref{sec:controls}.
+
+\subsection{Controls}
+\label{sec:controls}
+
+Three checks are built into the evaluation.
+
+\emph{Held-out readers.} The reader used in \eqref{eq:loss} never appears in
+reported numbers. Reported scores come from readers of a different family
+\cite{wang2024searaft,lotter2017prednet}, which are never differentiated
+through. This is enforced in code rather than by convention.
+
+\emph{Signed control.} Flipping $\omega$ in \eqref{eq:rotation} must flip the
+sign of the measured $\rho$. A method that produces motion energy without
+controlling its direction passes the unsigned test and fails this one.
+
+\emph{Negative control.} A transform that removes the percept for a human
+viewer must drive $\rho$ toward zero. Our first attempt was a single global
+permutation of the quantised luminance levels, which preserves the layout and
+the set of luminances present. It does not work, and the way it fails is
+informative: a global permutation still leaves a coherent asymmetric sequence,
+just a different one, so it yields a different illusion rather than none. The
+measured $\rho$ rose from $+0.100$ to $+0.390$. What works is permuting the
+levels independently within local blocks, which keeps the local histogram and
+the contrast but destroys the ordering across the pattern. We retain the global
+permutation as a \emph{positive} control, where a high score is the expected
+outcome.
+
+\subsection{Stimuli and reproducibility}
+
+Calibration and initialisation use procedurally generated drift patterns rather
+than published illusions, which are copyrighted. Elements are laid out in
+concentric rings with the asymmetric luminance sequence of
+\citet{kitaoka2003snakes}, at an angular repeat count that scales with
+resolution. The last point matters: with a fixed repeat count the pattern
+aliases at small sizes and the illusion disappears without warning. Measured
+$\rho$ on the same pattern rendered at three sizes was $+0.003$ at 96 pixels,
+$+0.051$ at 128, and $+0.100$ at 192, with the jitter step scaled with
+resolution. Since a stage-I pixel-space diffusion
+model generates at $64\times64$, this determines where guidance can be applied,
+and we treat the guidance stage as a setting to be checked rather than assumed.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

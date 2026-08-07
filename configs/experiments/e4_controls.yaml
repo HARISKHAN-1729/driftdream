@@ -1,0 +1,11 @@
+_base_: base.yaml
+exp: e4_controls
+description: >
+  H5. Transforms that abolish the human percept must collapse rho.
+  If rho survives luminance permutation, an artefact was optimised -- say so.
+methods: [driftdream]
+targets: [rotation_cw]
+n_prompts: 8
+seeds: [0, 1]
+# negative controls must collapse rho; positive ones must preserve it
+controls: [luminance_scramble, phase_scramble, luminance_permute, rotate180, grayscale]

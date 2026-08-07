@@ -1,0 +1,15 @@
+# Core -- everything in the offline path runs with just these.
+torch>=2.0
+numpy
+pyyaml
+pillow
+matplotlib
+pytest
+
+# Optional: diffusion generators (sdxl / deepfloyd) and the CLIP content term.
+#   pip install "diffusers>=0.27" "transformers>=4.40" accelerate safetensors sentencepiece
+#
+# Optional external readers -- clone the repos and set the env vars:
+#   DRIFTDREAM_DUAL_ROOT      https://github.com/anoymized/multi-order-motion-model
+#   DRIFTDREAM_SEARAFT_ROOT   https://github.com/princeton-vl/SEA-RAFT
+#   DRIFTDREAM_PREDNET_ROOT   https://github.com/eijwat/prednet_in_pytorch

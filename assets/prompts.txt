@@ -1,0 +1,21 @@
+# Prompts for the content term. Fixed and versioned: never tune on these.
+# Chosen to be loosely constrained -- a photograph of a face leaves the
+# optimiser no room for luminance micro-structure.
+a field of overlapping flower petals, botanical illustration
+a coral reef seen from above, dense texture
+concentric mandala of woven fabric
+an aerial view of terraced rice fields
+a mosaic of stained glass fragments
+swirling marbled paper, ink on water
+a dense canopy of autumn leaves
+scales of a tropical fish, macro photograph
+a spiral galaxy rendered as textile embroidery
+cross-section of an agate geode
+peacock feathers arranged in a circle
+rippled sand dunes at low sun
+a nest woven from bright reeds
+knitted wool in concentric rings
+sliced citrus fruit arranged radially
+a wreath of dried seed pods
+soap bubbles clustered on a dark surface
+lichen growing in concentric patches on stone

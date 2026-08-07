@@ -1,0 +1,10 @@
+_base_: base.yaml
+exp: e7_prior_cost
+description: >
+  Unconstrained pixel optimisation is the upper bound on achievable rho.
+  The gap to a prior-constrained generator is what the prior costs in illusion
+  strength and buys in content.
+methods: [driftdream, snakes_init]
+targets: [rotation_cw]
+n_prompts: 6
+seeds: [0, 1, 2]

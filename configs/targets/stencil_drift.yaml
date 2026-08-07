@@ -1,0 +1,2 @@
+target: {kind: laminar, angle_deg: 180.0, text: DRIFT}
+lam_quiet: 0.5      # background must stay still or the effect is illegible

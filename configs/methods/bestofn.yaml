@@ -1,0 +1,5 @@
+# B1: strongest training-free competitor (Ma et al. CVPR 2025), compute-matched.
+_base_: base.yaml
+method: bestofn
+guided: false
+search: {kind: best_of_n, n: 16}

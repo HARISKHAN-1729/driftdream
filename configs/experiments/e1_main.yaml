@@ -1,0 +1,7 @@
+_base_: base.yaml
+exp: e1_main
+description: Main controllability (H1, H4, H6). Held-out rho is the headline.
+methods: [driftdream, unguided, bestofn, nojitter]
+targets: [rotation_cw, rotation_ccw, radial_out, stencil_drift]
+n_prompts: 10
+seeds: [0, 1, 2]

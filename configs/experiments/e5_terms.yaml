@@ -1,0 +1,7 @@
+_base_: base.yaml
+exp: e5_terms
+description: Objective-term and residual-mode ablation.
+methods: [driftdream, onedir, nominal, nojitter]
+targets: [rotation_cw, stencil_drift]
+n_prompts: 6
+seeds: [0, 1, 2]

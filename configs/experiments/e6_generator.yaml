@@ -1,0 +1,11 @@
+_base_: base.yaml
+exp: e6_generator
+description: >
+  Prior-agnosticism, and the resolution question: does pixel-space beat latent
+  for a micro-structure objective? Requires downloads.
+methods: [driftdream]
+targets: [rotation_cw]
+n_prompts: 6
+seeds: [0, 1]
+sweep:
+  generator: [pixel, sdxl, deepfloyd]

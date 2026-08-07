@@ -1,0 +1,5 @@
+# Gradient-free fallback (Singhal et al. ICML 2025). Also the insurance policy.
+_base_: base.yaml
+method: fk
+guided: false
+search: {kind: fk_steering, n_particles: 8, n_rounds: 4, beta: 8.0}

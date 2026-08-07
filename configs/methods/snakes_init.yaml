@@ -1,0 +1,4 @@
+# E7: structure-prior upper bound (init from a procedural drift pattern).
+_base_: base.yaml
+method: snakes_init
+generator_kwargs: {init: snakes}

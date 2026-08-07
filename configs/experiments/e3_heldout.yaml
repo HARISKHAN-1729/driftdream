@@ -1,0 +1,10 @@
+_base_: base.yaml
+exp: e3_heldout
+description: >
+  H3, anti-reward-hacking. Optimise with the loop reader only; report rho under
+  readers that never entered a gradient, plus rho_loop-vs-rho_heldout correlation.
+methods: [driftdream, unguided]
+targets: [rotation_cw, rotation_ccw]
+n_prompts: 10
+seeds: [0, 1, 2]
+eval_readers: [motion_energy_alt]   # paper: [searaft, prednet]

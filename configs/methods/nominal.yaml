@@ -1,0 +1,5 @@
+# Residual-mode ablation: subtract the nominal shift instead of the measured
+# global component. Exposes reader gain error as a spurious residual.
+_base_: base.yaml
+method: nominal
+residual_mode: nominal

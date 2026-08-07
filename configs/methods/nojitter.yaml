@@ -1,0 +1,11 @@
+# B2 / H2: the ablation that should collapse to rho ~ 0.
+# A static frame has zero optical flow, so the objective is vacuous.
+#
+# This also serves as B3, the "Motion Guidance transplanted" baseline: applying
+# Geng & Owens' objective to a single still frame reduces to exactly this,
+# because their target displacement is measured between two DIFFERENT images.
+# That equivalence is the argument for why the jitter ensemble is required, and
+# it is why B3 needs no separate implementation.
+_base_: base.yaml
+method: nojitter
+fixation: {k: 2, delta_px: 0.0, n_dir: 1}

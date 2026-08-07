@@ -1,0 +1,4 @@
+# B0: does the prior already do this on its own?
+_base_: base.yaml
+method: unguided
+guided: false

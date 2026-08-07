@@ -1,0 +1,12 @@
+_base_: base.yaml
+exp: e2_jitter
+description: >
+  H2. Sweep jitter magnitude and ensemble size. rho ~ 0 at delta=0 or n_dir=1
+  is the causal evidence for the contributed component. This is the money figure.
+methods: [driftdream]
+targets: [rotation_cw]
+n_prompts: 4
+seeds: [0, 1, 2]
+sweep:
+  fixation.delta_px: [0.0, 2.0, 4.0, 6.0, 10.0, 16.0]
+  fixation.n_dir: [1, 2, 4, 8]

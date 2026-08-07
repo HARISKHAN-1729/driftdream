@@ -1,0 +1,34 @@
+# Shared defaults. Everything else inherits via `_base_: base.yaml`.
+seed: 0
+device: cuda                 # scripts fall back to cpu automatically
+results_root: results
+image_size: 256              # working resolution for the objective
+prompts_file: assets/prompts.txt
+
+# --- the jitter protocol (the contributed component) -------------------------
+fixation:
+  k: 4                       # frames per trajectory
+  delta_px: 6.0              # jitter step, scaled to image_size (see run_experiment)
+  n_dir: 8                   # trajectory DIRECTIONS. n_dir=1 => high-variance rho
+  n_turns: 0
+
+# --- readers -----------------------------------------------------------------
+# loop_reader appears in gradients; eval_readers never do (enforced in code).
+loop_reader: motion_energy
+loop_reader_kwargs: {}
+eval_readers: [motion_energy_alt]     # OFFLINE placeholder, same family.
+                                      # For the paper: [searaft, prednet]
+residual_mode: global        # 'global' | 'nominal' -- see driftdream/flow.py
+
+# --- objective weights -------------------------------------------------------
+lam_motion: 1.0
+lam_content: 0.0             # needs CLIP; set >0 with generator=sdxl/deepfloyd
+lam_quiet: 0.0               # >0 for stencil targets ("only the word moves")
+content_model: openai/clip-vit-large-patch14
+
+# --- generator ---------------------------------------------------------------
+generator: pixel             # pixel | sdxl | deepfloyd
+generator_kwargs:
+  steps: 300
+  lr: 0.05
+  tv_weight: 0.02

@@ -1,0 +1,5 @@
+# Jitter, but a single direction: isolates the DIRECTION-SPANNING part of the
+# ensemble from the mere presence of jitter.
+_base_: base.yaml
+method: onedir
+fixation: {n_dir: 1}
