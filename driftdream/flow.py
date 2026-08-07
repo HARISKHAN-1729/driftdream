@@ -58,12 +58,18 @@ def residual_flow(reader, movie: torch.Tensor, deltas: torch.Tensor,
 
     nf = getattr(reader, "n_frames", 2)
     if nf == 2:
-        acc = None
-        for i in range(1, k):
-            res = _pair_residual(reader, movie[i - 1], movie[i],
-                                 deltas[i] - deltas[i - 1], mode)
-            acc = res if acc is None else acc + res
-        return acc / (k - 1)
+        # One batched reader call for all K-1 pairs. On GPU the per-call
+        # overhead dominates otherwise: the ensemble is J*(K-1) clips of a few
+        # small convolutions each.
+        pairs = torch.stack([movie[i - 1:i + 1] for i in range(1, k)], 0)
+        flows = reader.flow_batch(pairs)                        # (K-1,2,H,W)
+        if mode == "nominal":
+            true = torch.stack([deltas[i] - deltas[i - 1] for i in range(1, k)], 0)
+            res = flows - true.to(flows.device, flows.dtype).view(-1, 2, 1, 1)
+        else:
+            med = flows.flatten(2).median(dim=2).values          # (K-1,2)
+            res = flows - med.view(-1, 2, 1, 1)
+        return res.mean(0)
 
     clip = movie
     if nf > k:
