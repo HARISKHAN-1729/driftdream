@@ -72,10 +72,26 @@ class MotionEnergyReader(Reader):
         self.latency_gain, self.damping = float(latency_gain), float(damping)
         self.device = device
         self._kernels = None
+        self._stacked = None
 
     def to(self, device):
-        self.device, self._kernels = device, None
+        self.device, self._kernels, self._stacked = device, None, None
         return self
+
+    def _stacked_bank(self, dtype):
+        """Concatenated filter bank, built once. Rebuilding it per call added
+        real overhead inside the optimisation loop."""
+        if self._stacked is None or self._stacked[0].dtype != dtype:
+            bank = self._bank(dtype)
+            self._stacked = (
+                torch.cat([k[2] for k in bank], 0),
+                torch.cat([k[3] for k in bank], 0),
+                torch.tensor([k[1] for k in bank], device=self.device,
+                             dtype=dtype).view(1, -1, 1, 1),
+                torch.tensor([k[0] for k in bank], device=self.device,
+                             dtype=dtype).view(1, -1, 1, 1),
+            )
+        return self._stacked
 
     def _bank(self, dtype):
         if self._kernels is None:
@@ -89,6 +105,14 @@ class MotionEnergyReader(Reader):
                     ks.append((th, f, e.to(dtype), o.to(dtype)))
             self._kernels = ks
         return self._kernels
+
+    def _latency_batch(self, gray: torch.Tensor) -> torch.Tensor:
+        """(B,T,H,W) version of _latency; lag is applied along T."""
+        if self.latency_gain <= 0:
+            return gray
+        a = self.latency_gain * (1.0 - gray.clamp(0, 1))
+        prev = torch.cat([gray[:, :1], gray[:, :-1]], 1)
+        return (1 - a) * gray + a * prev
 
     def _latency(self, gray: torch.Tensor) -> torch.Tensor:
         """Contrast/luminance-dependent temporal lag.
@@ -104,40 +128,50 @@ class MotionEnergyReader(Reader):
         prev = torch.cat([gray[:1], gray[:-1]], 0)
         return (1 - a) * gray + a * prev
 
+    def _solve(self, i0: torch.Tensor, i1: torch.Tensor, dt: float) -> torch.Tensor:
+        """(B,1,H,W) x2 -> (B,2,H,W). All orientations share one conv batch."""
+        pad = self.ksize // 2
+        ke, ko, freqs, th = self._stacked_bank(i0.dtype)
+        e0 = F.conv2d(i0, ke, padding=pad)               # (B,F,H,W)
+        o0 = F.conv2d(i0, ko, padding=pad)
+        e1 = F.conv2d(i1, ke, padding=pad)
+        o1 = F.conv2d(i1, ko, padding=pad)
+
+        a0 = torch.sqrt(e0 ** 2 + o0 ** 2 + EPS)
+        a1 = torch.sqrt(e1 ** 2 + o1 ** 2 + EPS)
+        dphi = _wrap(torch.atan2(o1, e1) - torch.atan2(o0, e0))
+        v = dphi / (2 * math.pi * freqs) / dt            # see sign note above
+        wgt = a0 * a1
+        nx, ny = torch.cos(th), torch.sin(th)
+        a11 = (wgt * nx * nx).sum(1)
+        a12 = (wgt * nx * ny).sum(1)
+        a22 = (wgt * ny * ny).sum(1)
+        b0 = (wgt * v * nx).sum(1)
+        b1 = (wgt * v * ny).sum(1)
+
+        lam = self.damping * (a11 + a22 + EPS)
+        a11d, a22d = a11 + lam, a22 + lam
+        det = a11d * a22d - a12 * a12 + EPS
+        vx = (a22d * b0 - a12 * b1) / det
+        vy = (-a12 * b0 + a11d * b1) / det
+        return torch.stack([vx, vy], 1)                  # (B,2,H,W)
+
     def flow(self, frames: torch.Tensor) -> torch.Tensor:
         if frames.shape[0] < 2:
             return torch.zeros(2, *frames.shape[-2:], device=frames.device,
                                dtype=frames.dtype)
-        gray = to_gray(frames.to(self.device))
-        gray = self._latency(gray)
-        i0, i1 = gray[0].unsqueeze(0).unsqueeze(0), gray[-1].unsqueeze(0).unsqueeze(0)
-        pad = self.ksize // 2
-        h, w = gray.shape[-2:]
-        dt = float(max(frames.shape[0] - 1, 1))
+        return self.flow_batch(frames.unsqueeze(0))[0]
 
-        A = torch.zeros(2, 2, h, w, device=i0.device, dtype=i0.dtype)
-        b = torch.zeros(2, h, w, device=i0.device, dtype=i0.dtype)
-        for th, f, ke, ko in self._bank(i0.dtype):
-            e0 = F.conv2d(i0, ke, padding=pad)[0, 0]
-            o0 = F.conv2d(i0, ko, padding=pad)[0, 0]
-            e1 = F.conv2d(i1, ke, padding=pad)[0, 0]
-            o1 = F.conv2d(i1, ko, padding=pad)[0, 0]
-            a0 = torch.sqrt(e0 ** 2 + o0 ** 2 + EPS)
-            a1 = torch.sqrt(e1 ** 2 + o1 ** 2 + EPS)
-            dphi = _wrap(torch.atan2(o1, e1) - torch.atan2(o0, e0))
-            v = dphi / (2 * math.pi * f) / dt           # see sign note in docstring
-            wgt = a0 * a1
-            nx, ny = math.cos(th), math.sin(th)
-            A[0, 0] += wgt * nx * nx
-            A[0, 1] += wgt * nx * ny
-            A[1, 0] += wgt * nx * ny
-            A[1, 1] += wgt * ny * ny
-            b[0] += wgt * v * nx
-            b[1] += wgt * v * ny
-
-        lam = self.damping * (A[0, 0] + A[1, 1] + EPS)
-        a11, a12, a22 = A[0, 0] + lam, A[0, 1], A[1, 1] + lam
-        det = a11 * a22 - a12 * a12 + EPS
-        vx = (a22 * b[0] - a12 * b[1]) / det
-        vy = (-a12 * b[0] + a11 * b[1]) / det
-        return torch.stack([vx, vy], 0)
+    def flow_batch(self, clips: torch.Tensor) -> torch.Tensor:
+        """(B, T, C, H, W) -> (B, 2, H, W). One conv batch for the whole set."""
+        if clips.dim() == 4:
+            clips = clips.unsqueeze(0)
+        x = clips.to(self.device)
+        bsz, t = x.shape[0], x.shape[1]
+        if t < 2:
+            return torch.zeros(bsz, 2, *x.shape[-2:], device=x.device, dtype=x.dtype)
+        gray = to_gray(x.reshape(bsz * t, *x.shape[2:])).reshape(bsz, t, *x.shape[-2:])
+        gray = self._latency_batch(gray)
+        i0 = gray[:, 0].unsqueeze(1)
+        i1 = gray[:, -1].unsqueeze(1)
+        return self._solve(i0, i1, float(max(t - 1, 1)))
