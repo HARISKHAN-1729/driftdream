@@ -49,8 +49,21 @@ def main():
                                    exp.get("seeds", [0]), grid))
     if a.limit:
         cells = cells[:a.limit]
+    from driftdream.perf import estimate_runtime
+    gk = exp.get("generator_kwargs", {})
+    fx = exp.get("fixation", {})
+    est = estimate_runtime(int(exp.get("image_size", 256)),
+                           int(gk.get("steps", 300)), int(fx.get("n_dir", 8)),
+                           int(fx.get("k", 4)), int(gk.get("guide_every", 1)),
+                           device)
     print(f"[{name}] {len(cells)} cells | device={device} | "
           f"methods={exp['methods']} targets={exp['targets']}")
+    print(f"[{name}] {est}  -> whole sweep on the order of "
+          f"{len(cells)} x that")
+    if device == "cpu" and len(cells) > 12:
+        print(f"[{name}] WARNING: {len(cells)} cells on CPU. The jitter "
+              "ensemble is many reader calls per step; this will not finish. "
+              "Use a GPU, or --limit for a smoke test.")
     if a.dry_run:
         for c in cells[:10]:
             print("   ", c[0], c[1], f"p{c[2][0]}", f"seed{c[3]}", c[4])
