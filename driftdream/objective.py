@@ -37,16 +37,40 @@ class MotionObjective:
 
     # ---- core -----------------------------------------------------------
     def ensemble_flow(self, x: torch.Tensor, seed: Optional[int] = None) -> torch.Tensor:
-        """Residual flow averaged over the direction-spanning jitter ensemble."""
-        acc, n = None, 0
-        for movie, deltas in self.fix.movies(
-                x, self.ensemble_seed if seed is None else seed):
-            f = residual_flow(self.reader, movie, deltas, mode=self.residual_mode)
-            acc = f if acc is None else acc + f
-            n += 1
-        if acc is None:
+        """Residual flow averaged over the direction-spanning jitter ensemble.
+
+        All J*(K-1) clips go to the reader in ONE batched call when the reader
+        supports it. Looping instead leaves a GPU mostly idle -- each clip is a
+        handful of small convolutions, so launch overhead dominates.
+        """
+        seed = self.ensemble_seed if seed is None else seed
+        trajs = self.fix.trajectories(x.device, seed)
+        if not trajs or self.fix.k < 2:
             return torch.zeros(2, *x.shape[-2:], device=x.device, dtype=x.dtype)
-        return acc / n
+
+        if getattr(self.reader, "n_frames", 2) != 2:
+            acc = None
+            for movie, deltas in self.fix.movies(x, seed):
+                f = residual_flow(self.reader, movie, deltas,
+                                  mode=self.residual_mode)
+                acc = f if acc is None else acc + f
+            return acc / len(trajs)
+
+        from .fixation import build_movie
+        clips, trues = [], []
+        for d in trajs:
+            mov = build_movie(x, d, self.fix.padding_mode)
+            for i in range(1, self.fix.k):
+                clips.append(mov[i - 1:i + 1])
+                trues.append(d[i] - d[i - 1])
+        flows = self.reader.flow_batch(torch.stack(clips, 0))    # (N,2,H,W)
+        if self.residual_mode == "nominal":
+            t = torch.stack(trues, 0).to(flows.device, flows.dtype)
+            res = flows - t.view(-1, 2, 1, 1)
+        else:
+            med = flows.flatten(2).median(dim=2).values
+            res = flows - med.view(-1, 2, 1, 1)
+        return res.mean(0)
 
     def measure(self, x: torch.Tensor, seed: Optional[int] = None) -> dict:
         """No-grad evaluation. Returns rho and flow statistics."""
