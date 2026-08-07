@@ -25,6 +25,16 @@ class Reader(ABC):
         Must preserve autograd if `differentiable` is True.
         """
 
+    def flow_batch(self, clips: torch.Tensor) -> torch.Tensor:
+        """(B, T, C, H, W) -> (B, 2, H, W). Override for a real batched path.
+
+        The jitter ensemble evaluates J*(K-1) clips per loss call. Running them
+        one at a time leaves a GPU almost idle: each clip is a handful of small
+        convolutions. Readers that can batch should do so -- it is the single
+        largest speedup available, and it changes no result.
+        """
+        return torch.stack([self.flow(c) for c in clips], 0)
+
     def to(self, device):
         return self
 
