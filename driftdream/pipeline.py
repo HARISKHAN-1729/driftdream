@@ -17,9 +17,18 @@ from .readers import get_eval_readers, get_reader
 from .targets import Target, build_target
 
 
-def resolve_device(name: str = "cuda") -> str:
+_PERF_DONE = False
+
+
+def resolve_device(name: str = "cuda", verbose: bool = False) -> str:
+    """Resolve the device and apply GPU settings once per process."""
+    global _PERF_DONE
+    from .perf import setup
     if name.startswith("cuda") and not torch.cuda.is_available():
-        return "cpu"
+        name = "cpu"
+    if not _PERF_DONE:
+        setup(name, verbose=verbose)
+        _PERF_DONE = True
     return name
 
 
