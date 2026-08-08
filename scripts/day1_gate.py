@@ -146,20 +146,61 @@ def gate_c2(reader, device, size):
     return True                     # informative, never blocking
 
 
-def gate_d(reader, device, size, steps, thresh):
-    print("\nGATE D  optimisability (the Day-0 shortcut)")
+def _optimise(reader, device, size, steps, resample, n_dir=4, lr=0.15):
     tgt = build_target({"kind": "rotation", "sign": 1.0}, size, size, device=device)
     obj = MotionObjective(reader, tgt,
-                          Fixation(k=2, delta_px=max(size / 256.0 * 6.0, 2.0), n_dir=4),
-                          lam_motion=1.0)
+                          Fixation(k=2, delta_px=max(size / 256.0 * 6.0, 2.0),
+                                   n_dir=n_dir),
+                          lam_motion=1.0, resample=resample)
     gen = get_generator("pixel", device=device, size=size, steps=steps,
-                        lr=0.15, tv_weight=0.005, log_every=max(steps // 4, 1))
-    t0 = time.time()
+                        lr=lr, tv_weight=0.005, log_every=max(steps // 4, 1))
     x, tr = gen.sample("", seed=0, hook=obj)
+    return obj, x, tr
+
+
+def gate_d(reader, device, size, steps, thresh):
+    """Gradient health only: can this objective be descended at all?
+
+    Deliberately runs with a FROZEN jitter fan. Whether a solution generalises
+    to unseen fan orientations is a separate question (gate D2) and mixing the
+    two would make a hard research problem look like a broken gradient.
+    """
+    print("\nGATE D  optimisability (the Day-0 shortcut, frozen fan)")
+    t0 = time.time()
+    obj, x, tr = _optimise(reader, device, size, steps, resample=False)
     r = obj.measure(x)["rho"]
     print(f"       rho trace: {[round(v, 3) for v in tr['rho']]}  ({time.time()-t0:.1f}s)")
     return line("rho climbs on a free tensor", r > thresh,
                 f"final rho = {r:+.4f} (need > {thresh})")
+
+
+def gate_d2(reader, device, size, steps):
+    """Informative, never blocking. How much does a frozen fan flatter you?
+
+    A frozen fan lets the optimiser tune the image to J specific jitter
+    directions; the result scores well on those and can score near zero on any
+    other. Resampling the fan each step removes that escape route, and the
+    gap between the two is the size of the problem.
+    """
+    print("\nGATE D2 generalisation across jitter directions")
+    probe = Fixation(k=2, delta_px=max(size / 256.0 * 6.0, 2.0), n_dir=16,
+                     seed=99991)
+    out = {}
+    for tag, rs in (("frozen fan", False), ("resampled", True)):
+        obj, x, _ = _optimise(reader, device, size, steps, resample=rs)
+        out[tag] = (obj.measure(x)["rho"],
+                    obj.measure(x, seed=99991, fixation=probe)["rho"])
+        print(f"       {tag:11s} rho_loop {out[tag][0]:+.4f}   "
+              f"rho_probe {out[tag][1]:+.4f}   gap {out[tag][0]-out[tag][1]:+.4f}")
+    fz, rsm = out["frozen fan"], out["resampled"]
+    if fz[0] - fz[1] > 0.2:
+        print("       -> A frozen fan overfits its own directions here. Keep")
+        print("          resample_ensemble=true and report rho_probe, not rho_loop.")
+    if rsm[1] < 0.3:
+        print("       -> Resampling does not converge in this budget. Expect")
+        print("          LOWER honest rho, and raise steps / lower lr. This is")
+        print("          the difficulty of the problem, not a broken gradient.")
+    return True
 
 
 def main():
@@ -170,6 +211,7 @@ def main():
     ap.add_argument("--rho-thresh", type=float, default=0.03)
     ap.add_argument("--opt-thresh", type=float, default=0.2)
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--skip-d2", action="store_true")
     a = ap.parse_args()
 
     dev = resolve_device(a.device)
@@ -181,6 +223,8 @@ def main():
     results["C illusion"] = gate_c(reader, dev, a.size, a.rho_thresh)
     gate_c2(reader, dev, a.size)
     results["D optimisability"] = gate_d(reader, dev, a.size, a.steps, a.opt_thresh)
+    if not a.skip_d2:
+        gate_d2(reader, dev, a.size, a.steps)
 
     print("\n" + "=" * 62)
     for k, v in results.items():
@@ -197,4 +241,18 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:                     # environment, not science
+        import traceback
+        traceback.print_exc()
+        print("\n" + "=" * 62)
+        print("  The gate CRASHED before producing a result.")
+        print(f"  {type(exc).__name__}: {exc}")
+        print("\n  This says nothing about whether the method works. Fix the")
+        print("  install, then re-run:")
+        print("      python -c 'import driftdream, driftdream.perf'")
+        print("      python -m pytest tests/ -q")
+        raise SystemExit(2)
