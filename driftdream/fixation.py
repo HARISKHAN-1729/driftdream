@@ -96,13 +96,29 @@ class Fixation:
         self.seed, self.angle_deg, self.padding_mode = seed, angle_deg, padding_mode
 
     def trajectories(self, device=None, seed: Optional[int] = None):
+        """J directions, evenly spaced, with a RANDOM GLOBAL ROTATION.
+
+        The rotation offset matters. Without it the fan is the fixed set of
+        angles {360j/J}, identical at every optimisation step, and the image
+        can be tuned to those specific angles: measured rho reaches 0.99 on
+        them while rho on any other fan sits near zero. That is an adversarial
+        example for one ensemble, not an image with illusory structure. A fresh
+        offset each step forces the image to satisfy the distribution of eye
+        movement directions instead of J memorised samples.
+        """
         base = self.seed if seed is None else seed
+        n = max(self.n_dir, 1)
+        if self.angle_deg is None:
+            g = torch.Generator().manual_seed(int(base) & 0x7FFFFFFF)
+            phase = float(torch.rand(1, generator=g).item()) * 360.0 / n
+        else:
+            phase = 0.0
         out = []
-        for j in range(max(self.n_dir, 1)):
+        for j in range(n):
             ang = (self.angle_deg if self.angle_deg is not None
-                   else 360.0 * j / max(self.n_dir, 1))
+                   else phase + 360.0 * j / n)
             out.append(make_trajectory(self.k, self.delta_px, self.n_turns,
-                                       base * 1000 + j, ang, device))
+                                       int(base) * 1000 + j, ang, device))
         return out
 
     def movies(self, x: torch.Tensor, seed: Optional[int] = None):
