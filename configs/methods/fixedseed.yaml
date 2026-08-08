@@ -1,0 +1,6 @@
+# Ablation: freeze the jitter ensemble for the whole optimisation.
+# This is what produces adversarial solutions -- high rho on the trajectories
+# that were optimised, near-zero rho on unseen ones.
+_base_: base.yaml
+method: fixedseed
+resample_ensemble: false
