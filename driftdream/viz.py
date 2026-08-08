@@ -63,7 +63,10 @@ def curve(xs, series: dict, xlabel: str, ylabel: str, out: str,
     for name, ys in series.items():
         ax.plot(xs, ys, marker="o", label=name, linewidth=1.8, markersize=4)
     if hline is not None:
-        ax.axhline(hline, color="#888", linestyle="--", linewidth=1)
+        ax.axhline(hline, color="#c92a2a", linestyle="--", linewidth=1.2,
+                   label=f"real illusion ({hline:+.2f})" if hline else None)
+    if hline:
+        ax.axhline(0.0, color="#aaa", linestyle=":", linewidth=0.9)
     ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
     if title:
         ax.set_title(title, fontsize=10)
