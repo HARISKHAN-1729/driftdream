@@ -72,7 +72,8 @@ def fig_jitter(root, exp, out_dir):
             if any(sw.get(o) != v for o, v in fixed.items()):
                 continue
             for mk, mv in m["metrics"].items():
-                if mk.startswith("rho_"):
+                if mk.startswith("rho_") and mk in (
+                        "rho_loop", "rho_probe", "rho_gap"):
                     buck[mk][sw[key]].append(mv)
         if not buck:
             continue
