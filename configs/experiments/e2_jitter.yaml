@@ -1,12 +1,21 @@
 _base_: base.yaml
 exp: e2_jitter
 description: >
-  H2. Sweep jitter magnitude and ensemble size. rho ~ 0 at delta=0 or n_dir=1
-  is the causal evidence for the contributed component. This is the money figure.
-methods: [driftdream]
+  H2. Three axes: jitter magnitude, ensemble size, and whether the ensemble is
+  resampled each optimisation step.
+
+  rho_loop is measured on the trajectories the optimiser saw and saturates near
+  0.99 everywhere -- it cannot distinguish these conditions. rho_probe uses a
+  fixed 16-direction fan with a seed no run optimised against, and rho_gap
+  (loop minus probe) is the quantity that shows what is happening: with a
+  frozen ensemble, n_dir=1 reaches 0.997 on its own directions and ~0.34 on
+  unseen ones, which is an adversarial example rather than an illusion.
+methods: [driftdream, fixedseed]
 targets: [rotation_cw]
 n_prompts: 4
 seeds: [0, 1, 2]
+generator: pixel
+generator_kwargs: {steps: 200, lr: 0.1, tv_weight: 0.02}
 sweep:
   fixation.delta_px: [0.0, 2.0, 4.0, 6.0, 10.0, 16.0]
   fixation.n_dir: [1, 2, 4, 8]
