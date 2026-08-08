@@ -52,10 +52,24 @@ def fig_jitter(root, exp, out_dir):
                                 "fig3a_delta.png"),
                                ("fixation.n_dir", "ensemble directions n_dir",
                                 "fig3b_ndir.png")]:
+        # Hold the OTHER swept variable fixed. Averaging over it silently mixes
+        # in the delta_px=0 cells, which are zero by construction: every n_dir
+        # then lands on the same value ((0 + 5*0.99)/6 = 0.83) and the panel
+        # looks flat for a reason that has nothing to do with n_dir.
+        others = sorted({k for m in rs for k in (m.get("sweep") or {}) if k != key})
+        fixed = {}
+        for o in others:
+            vals = sorted({(m.get("sweep") or {}).get(o) for m in rs
+                           if (m.get("sweep") or {}).get(o) is not None})
+            nz = [v for v in vals if not (isinstance(v, (int, float)) and v == 0)]
+            if nz:
+                fixed[o] = nz[len(nz) // 2]        # a representative non-zero level
         buck = defaultdict(lambda: defaultdict(list))
         for m in rs:
             sw = m.get("sweep") or {}
             if key not in sw:
+                continue
+            if any(sw.get(o) != v for o, v in fixed.items()):
                 continue
             for mk, mv in m["metrics"].items():
                 if mk.startswith("rho_"):
@@ -65,8 +79,10 @@ def fig_jitter(root, exp, out_dir):
         xs = sorted({x for d in buck.values() for x in d})
         series = {mk: [st.mean(d[x]) if d.get(x) else float("nan") for x in xs]
                   for mk, d in buck.items()}
+        sub = ", ".join(f"{o.split('.')[-1]}={v}" for o, v in fixed.items())
         made.append(curve(xs, series, xlabel, "rho", os.path.join(out_dir, fname),
-                          title="H2: the jitter ensemble is the causal component"))
+                          title="H2: jitter is required"
+                                + (f"  ({sub} held fixed)" if sub else "")))
     return made
 
 
