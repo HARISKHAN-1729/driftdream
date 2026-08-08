@@ -24,6 +24,10 @@ def main():
                     help="override eval_readers stored in each run's config")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--probe", action="store_true",
+                    help="also (re)compute rho_probe on a held-out ensemble")
+    ap.add_argument("--probe-ndir", type=int, default=16)
+    ap.add_argument("--probe-seed", type=int, default=99991)
     a = ap.parse_args()
 
     device = resolve_device(a.device)
@@ -35,9 +39,11 @@ def main():
         if a.readers:
             cfg = dict(cfg); cfg["eval_readers"] = a.readers
         names = cfg.get("eval_readers", []) or []
-        if not names:
+        need_probe = a.probe and (a.force or "rho_probe" not in meta.get("metrics", {}))
+        if not names and not need_probe:
             continue
-        if not a.force and all(f"rho_{r}" in meta.get("metrics", {}) for r in names):
+        if (not a.force and not need_probe
+                and all(f"rho_{r}" in meta.get("metrics", {}) for r in names)):
             continue
         path = meta["_dir"] + "/image.png"
         try:
@@ -50,6 +56,21 @@ def main():
                                             seed=int(meta.get("seed", 0))).items():
             for k, v in eo.measure(img).items():
                 new[f"{k}_{rn}"] = v
+        if need_probe:
+            # Score with an ensemble the optimiser never saw. rho_loop is
+            # measured on the trajectories that were optimised, so it cannot
+            # show whether spanning directions bought anything.
+            from driftdream.fixation import Fixation
+            from driftdream.pipeline import build_objective
+            size = int(cfg.get("image_size", 256))
+            probe = Fixation(k=2, delta_px=6.0 * size / 256.0,
+                             n_dir=a.probe_ndir, n_turns=0, seed=a.probe_seed)
+            obj = build_objective(cfg, device=device,
+                                  seed=int(meta.get("seed", 0)))
+            new["rho_probe"] = obj.measure(img, seed=a.probe_seed,
+                                           fixation=probe)["rho"]
+            new["rho_gap"] = meta.get("metrics", {}).get("rho_loop",
+                                                         float("nan")) - new["rho_probe"]
         rd = RunDir.__new__(RunDir)
         rd.path, rd.meta_path = meta["_dir"], meta["_dir"] + "/meta.json"
         rd.update_metrics(new)
