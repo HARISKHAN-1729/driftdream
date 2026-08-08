@@ -27,6 +27,19 @@ def _runs(root, exp):
     return [m for m in walk_runs(root, exp) if "error" not in m and m.get("metrics")]
 
 
+def _ceiling(root):
+    """rho of a genuine drift pattern, for the reference line. Without it the
+    plots imply 1.0 is the target, which nothing reachable ever attains."""
+    import json
+    p = os.path.join(root, "reference_ceiling.json")
+    if os.path.isfile(p):
+        try:
+            return json.load(open(p)).get("ceiling")
+        except Exception:
+            return None
+    return None
+
+
 def fig_gallery(root, exp, out, device, n=8):
     rs = [m for m in _runs(root, exp) if m.get("method") == "driftdream"][:n]
     if not rs:
@@ -45,7 +58,7 @@ def fig_gallery(root, exp, out, device, n=8):
                    scale=float(max(1e-3, max(f.abs().max() for f in flows))) * 2)
 
 
-def fig_jitter(root, exp, out_dir):
+def fig_jitter(root, exp, out_dir):  # noqa: C901
     rs = _runs(root, exp)
     made = []
     for key, xlabel, fname in [("fixation.delta_px", "jitter magnitude (px)",
@@ -64,6 +77,8 @@ def fig_jitter(root, exp, out_dir):
             nz = [v for v in vals if not (isinstance(v, (int, float)) and v == 0)]
             if nz:
                 fixed[o] = nz[len(nz) // 2]        # a representative non-zero level
+        # Split by METHOD. Averaging driftdream and fixedseed together turns
+        # a 0.99-vs-0.5 contrast into a meaningless middle line.
         buck = defaultdict(lambda: defaultdict(list))
         for m in rs:
             sw = m.get("sweep") or {}
@@ -71,10 +86,10 @@ def fig_jitter(root, exp, out_dir):
                 continue
             if any(sw.get(o) != v for o, v in fixed.items()):
                 continue
+            meth = m.get("method") or "run"
             for mk, mv in m["metrics"].items():
-                if mk.startswith("rho_") and mk in (
-                        "rho_loop", "rho_probe", "rho_gap"):
-                    buck[mk][sw[key]].append(mv)
+                if mk in ("rho_loop", "rho_probe"):
+                    buck[f"{meth}:{mk.replace('rho_', '')}"][sw[key]].append(mv)
         if not buck:
             continue
         xs = sorted({x for d in buck.values() for x in d})
@@ -83,7 +98,8 @@ def fig_jitter(root, exp, out_dir):
         sub = ", ".join(f"{o.split('.')[-1]}={v}" for o, v in fixed.items())
         made.append(curve(xs, series, xlabel, "rho", os.path.join(out_dir, fname),
                           title="H2: jitter is required"
-                                + (f"  ({sub} held fixed)" if sub else "")))
+                                + (f"  ({sub} held fixed)" if sub else ""),
+                          hline=_ceiling(root)))
     return made
 
 
