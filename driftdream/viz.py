@@ -16,8 +16,13 @@ def _mpl():
 
 def flow_overlay(ax, img: torch.Tensor, flow: torch.Tensor,
                  mask: Optional[torch.Tensor] = None, step: int = 16,
-                 scale: float = 1.0, color: str = "#ff2d55"):
-    """Quiver of the residual flow over the image."""
+                 scale: Optional[float] = None, color: str = "#ff2d55"):
+    """Quiver of the residual flow over the image.
+
+    Arrow length is normalised by the MEDIAN magnitude inside the mask, not by
+    the maximum. Scaling by the max lets one outlier pixel shrink every other
+    arrow to a dot, which made a coherent rotation look like scattered noise.
+    """
     ax.imshow(img.detach().cpu().permute(1, 2, 0).numpy())
     f = flow.detach().cpu()
     h, w = f.shape[-2:]
@@ -29,15 +34,18 @@ def flow_overlay(ax, img: torch.Tensor, flow: torch.Tensor,
     if mask is not None:
         m = mask.detach().cpu()[gy, gx] > 0.5
         u, v = u * m, v * m
-    ax.quiver(gx, gy, u, -v, color=color, angles="xy",
-              scale_units="xy", scale=1.0 / max(scale, 1e-6),
-              width=0.004, headwidth=3.5)
+    mag = torch.sqrt(u ** 2 + v ** 2)
+    med = float(mag[mag > 0].median()) if bool((mag > 0).any()) else 1.0
+    if scale is None:
+        scale = step * 0.8 / max(med, 1e-6)      # median arrow ~ 0.8 of spacing
+    ax.quiver(gx, gy, u * scale, -v * scale, color=color, angles="xy",
+              scale_units="xy", scale=1.0, width=0.004, headwidth=3.5)
     ax.set_xticks([]); ax.set_yticks([])
 
 
 def gallery(images: List[torch.Tensor], flows: List[torch.Tensor],
             titles: List[str], out: str, mask=None, ncol: int = 4,
-            scale: float = 1.0):
+            scale: Optional[float] = None):
     plt = _mpl()
     n = len(images)
     ncol = min(ncol, max(n, 1))
