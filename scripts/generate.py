@@ -34,6 +34,19 @@ def run_one(cfg, prompt, seed, device=None):
         img, trace = gen.sample(prompt, seed=seed, hook=None)
     img = img.to(device)
     m = {f"{k}_loop": v for k, v in obj.measure(img).items()}
+
+    # Held-out PROBE ensemble: fixed, large, different seed, never optimised
+    # against. rho_probe is the honest generalisation number; rho_loop is
+    # measured on the same trajectories the optimiser saw.
+    from driftdream.fixation import Fixation
+    size = int(cfg.get("image_size", 256))
+    pf = dict(cfg.get("probe_fixation", {}))
+    probe = Fixation(k=int(pf.get("k", 2)),
+                     delta_px=float(pf.get("delta_px", 6.0)) * size / 256.0,
+                     n_dir=int(pf.get("n_dir", 16)), n_turns=0,
+                     seed=int(pf.get("seed", 99991)))
+    m["rho_probe"] = obj.measure(img, seed=int(pf.get("seed", 99991)),
+                                 fixation=probe)["rho"]
     for name, eo in build_eval_objectives(cfg, device=device, seed=seed).items():
         for k, v in eo.measure(img).items():
             m[f"{k}_{name}"] = v
