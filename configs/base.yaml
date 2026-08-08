@@ -6,6 +6,12 @@ image_size: 256              # working resolution for the objective
 prompts_file: assets/prompts.txt
 
 # --- the jitter protocol (the contributed component) -------------------------
+# Resample the direction fan each optimisation step. With a frozen fan the
+# image is tuned to J specific angles: rho on those angles reaches 0.99 while
+# rho on unseen angles falls to ~0.34 at n_dir=1. Turn off only for the
+# ablation (configs/methods/fixedseed.yaml).
+resample_ensemble: true
+
 fixation:
   k: 4                       # frames per trajectory
   delta_px: 6.0              # jitter step, scaled to image_size (see run_experiment)
