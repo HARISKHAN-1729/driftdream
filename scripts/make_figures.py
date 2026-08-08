@@ -54,8 +54,8 @@ def fig_gallery(root, exp, out, device, n=8):
         mask = obj.target.mask
         imgs.append(img.cpu()); flows.append(f.cpu())
         titles.append(f"{m['target']}  rho={m['metrics'].get('rho_loop', 0):+.3f}")
-    return gallery(imgs, flows, titles, out, mask=mask.cpu() if mask is not None else None,
-                   scale=float(max(1e-3, max(f.abs().max() for f in flows))) * 2)
+    return gallery(imgs, flows, titles, out,
+                   mask=mask.cpu() if mask is not None else None)
 
 
 def fig_jitter(root, exp, out_dir):  # noqa: C901
