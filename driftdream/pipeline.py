@@ -63,7 +63,8 @@ def build_objective(cfg: Dict[str, Any], device: Optional[str] = None,
         lam_motion=float(cfg.get("lam_motion", 1.0)), lam_content=lam_c,
         lam_quiet=float(cfg.get("lam_quiet", 0.0)),
         prompt=cfg.get("prompt", ""), content_scorer=scorer,
-        residual_mode=cfg.get("residual_mode", "global"), ensemble_seed=seed)
+        residual_mode=cfg.get("residual_mode", "global"), ensemble_seed=seed,
+        resample=bool(cfg.get("resample_ensemble", True)))
 
 
 def build_eval_objectives(cfg: Dict[str, Any], device=None, seed: int = 0,
