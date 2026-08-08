@@ -63,7 +63,11 @@ def main():
             from driftdream.fixation import Fixation
             from driftdream.pipeline import build_objective
             size = int(cfg.get("image_size", 256))
-            probe = Fixation(k=2, delta_px=6.0 * size / 256.0,
+            # Magnitude-matched: a probe at a different jitter magnitude
+            # measures the reader's magnitude tuning, not the image.
+            train_delta = float(cfg.get("fixation", {}).get("delta_px", 6.0)) \
+                * size / 256.0
+            probe = Fixation(k=2, delta_px=train_delta,
                              n_dir=a.probe_ndir, n_turns=0, seed=a.probe_seed)
             obj = build_objective(cfg, device=device,
                                   seed=int(meta.get("seed", 0)))
