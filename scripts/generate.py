@@ -41,8 +41,13 @@ def run_one(cfg, prompt, seed, device=None):
     from driftdream.fixation import Fixation
     size = int(cfg.get("image_size", 256))
     pf = dict(cfg.get("probe_fixation", {}))
+    # MAGNITUDE-MATCHED to training. A probe at a different jitter magnitude
+    # measures the reader's magnitude tuning rather than the image: a genuine
+    # drift pattern itself scores -0.01 at delta=2 and +0.15 at delta=6. Only
+    # the directions and the seed are held out.
+    train_delta = float(cfg.get("fixation", {}).get("delta_px", 6.0)) * size / 256.0
     probe = Fixation(k=int(pf.get("k", 2)),
-                     delta_px=float(pf.get("delta_px", 6.0)) * size / 256.0,
+                     delta_px=float(pf.get("delta_px", train_delta)),
                      n_dir=int(pf.get("n_dir", 16)), n_turns=0,
                      seed=int(pf.get("seed", 99991)))
     m["rho_probe"] = obj.measure(img, seed=int(pf.get("seed", 99991)),
