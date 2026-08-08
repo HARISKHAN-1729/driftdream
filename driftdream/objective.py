@@ -36,7 +36,8 @@ class MotionObjective:
         self.residual_mode, self.ensemble_seed = residual_mode, int(ensemble_seed)
 
     # ---- core -----------------------------------------------------------
-    def ensemble_flow(self, x: torch.Tensor, seed: Optional[int] = None) -> torch.Tensor:
+    def ensemble_flow(self, x: torch.Tensor, seed: Optional[int] = None,
+                      fixation=None) -> torch.Tensor:
         """Residual flow averaged over the direction-spanning jitter ensemble.
 
         All J*(K-1) clips go to the reader in ONE batched call when the reader
@@ -44,13 +45,14 @@ class MotionObjective:
         handful of small convolutions, so launch overhead dominates.
         """
         seed = self.ensemble_seed if seed is None else seed
-        trajs = self.fix.trajectories(x.device, seed)
-        if not trajs or self.fix.k < 2:
+        fix = self.fix if fixation is None else fixation
+        trajs = fix.trajectories(x.device, seed)
+        if not trajs or fix.k < 2:
             return torch.zeros(2, *x.shape[-2:], device=x.device, dtype=x.dtype)
 
         if getattr(self.reader, "n_frames", 2) != 2:
             acc = None
-            for movie, deltas in self.fix.movies(x, seed):
+            for movie, deltas in fix.movies(x, seed):
                 f = residual_flow(self.reader, movie, deltas,
                                   mode=self.residual_mode)
                 acc = f if acc is None else acc + f
@@ -59,8 +61,8 @@ class MotionObjective:
         from .fixation import build_movie
         clips, trues = [], []
         for d in trajs:
-            mov = build_movie(x, d, self.fix.padding_mode)
-            for i in range(1, self.fix.k):
+            mov = build_movie(x, d, fix.padding_mode)
+            for i in range(1, fix.k):
                 clips.append(mov[i - 1:i + 1])
                 trues.append(d[i] - d[i - 1])
         flows = self.reader.flow_batch(torch.stack(clips, 0))    # (N,2,H,W)
@@ -72,10 +74,18 @@ class MotionObjective:
             res = flows - med.view(-1, 2, 1, 1)
         return res.mean(0)
 
-    def measure(self, x: torch.Tensor, seed: Optional[int] = None) -> dict:
-        """No-grad evaluation. Returns rho and flow statistics."""
+    def measure(self, x: torch.Tensor, seed: Optional[int] = None,
+                fixation=None) -> dict:
+        """No-grad evaluation. Returns rho and flow statistics.
+
+        Pass `fixation` to score with an ensemble the optimiser never saw.
+        Scoring on the SAME trajectories that were optimised is train-on-test:
+        a single-direction run then reports a near-perfect rho simply because
+        it satisfied the one ensemble it was shown, and the value of spanning
+        directions becomes invisible.
+        """
         with torch.no_grad():
-            f = self.ensemble_flow(x, seed)
+            f = self.ensemble_flow(x, seed, fixation=fixation)
             r = float(rho(f, self.target.field, self.target.mask))
             q = float(quiescence(f, self.target.mask))
             mag = f.pow(2).sum(0).sqrt()
