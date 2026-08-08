@@ -27,13 +27,22 @@ class MotionObjective:
                  lam_motion: float = 1.0, lam_content: float = 0.0,
                  lam_quiet: float = 0.0, prompt: str = "",
                  content_scorer: Optional[ContentScorer] = None,
-                 residual_mode: str = "global", ensemble_seed: int = 0):
+                 residual_mode: str = "global", ensemble_seed: int = 0,
+                 resample: bool = True):
         self.reader, self.target, self.fix = reader, target, fixation
         self.lam_motion, self.lam_content, self.lam_quiet = (
             float(lam_motion), float(lam_content), float(lam_quiet))
         self.prompt = prompt
         self.content = content_scorer
         self.residual_mode, self.ensemble_seed = residual_mode, int(ensemble_seed)
+        # Resample the jitter ensemble every optimisation step. With a fixed
+        # seed the optimiser sees the SAME trajectories at every step and can
+        # memorise them: measured rho on those trajectories reaches 0.99 while
+        # rho on unseen trajectories sits near 0, i.e. an adversarial example
+        # for one ensemble rather than an image with illusory structure.
+        # Resampling forces the image to satisfy the DISTRIBUTION of eye
+        # movements, which is what the percept actually requires.
+        self.resample = bool(resample)
 
     # ---- core -----------------------------------------------------------
     def ensemble_flow(self, x: torch.Tensor, seed: Optional[int] = None,
@@ -93,7 +102,8 @@ class MotionObjective:
                 "flow_mean_mag": float(mag.mean()), "flow_max_mag": float(mag.max())}
 
     def __call__(self, x: torch.Tensor, step: int = 0):
-        f = self.ensemble_flow(x)
+        seed = (self.ensemble_seed * 100003 + step) if self.resample else None
+        f = self.ensemble_flow(x, seed=seed)
         r = rho(f, self.target.field, self.target.mask)
         loss = self.lam_motion * (1.0 - r)
         info = {"rho": float(r.detach())}
