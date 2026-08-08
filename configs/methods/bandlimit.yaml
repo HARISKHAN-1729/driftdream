@@ -1,0 +1,11 @@
+# Force coarse structure. Nothing in the objective constrains spatial scale,
+# so the optimiser uses the finest texture the reader responds to -- which is
+# the structure human peripheral vision resolves worst. Optimising a coarser
+# grid and upsampling forces elements a person could actually see.
+#
+# Measured: rho_probe falls from +0.288 (unconstrained) to +0.146 at 2x
+# coarser, i.e. to the reference-illusion level. Report this trade-off.
+_base_: base.yaml
+method: bandlimit
+generator: pixel
+generator_kwargs: {steps: 200, lr: 0.1, tv_weight: 0.01, band_limit: 64}
