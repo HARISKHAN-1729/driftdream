@@ -85,6 +85,9 @@ def build_eval_objectives(cfg: Dict[str, Any], device=None, seed: int = 0,
     return out
 
 
+_GEN_CACHE: Dict[Any, Any] = {}
+
+
 def build_generator(cfg: Dict[str, Any], device: Optional[str] = None):
     """Build the generator, dropping kwargs it does not accept.
 
@@ -116,7 +119,15 @@ def build_generator(cfg: Dict[str, Any], device: Optional[str] = None):
             warnings.warn(f"generator {name!r} does not accept {dropped}; dropping. "
                           f"Accepted: {sorted(accepted)}")
         kw = {k: v for k, v in kw.items() if k in accepted}
-    return get_generator(name, device=device, **kw)
+    if name == "sdxl":
+        # Working resolution for the objective; SDXL still samples at `size`.
+        kw.setdefault("out_size", int(cfg.get("image_size", 256)))
+    # Cache by (name, device, kwargs). Diffusion generators load several GB of
+    # weights; rebuilding one per sweep cell dominated the wall clock.
+    key = (name, device, tuple(sorted((k, str(v)) for k, v in kw.items())))
+    if key not in _GEN_CACHE:
+        _GEN_CACHE[key] = get_generator(name, device=device, **kw)
+    return _GEN_CACHE[key]
 
 
 def load_method_config(method: str, target: str, overrides=None) -> Dict[str, Any]:
