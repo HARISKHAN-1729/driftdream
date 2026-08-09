@@ -27,21 +27,29 @@ def _runs(root, exp):
     return [m for m in walk_runs(root, exp) if "error" not in m and m.get("metrics")]
 
 
-def _ceiling(root):
-    """rho of a genuine drift pattern, for the reference line. Without it the
-    plots imply 1.0 is the target, which nothing reachable ever attains."""
+def _ceiling(root, by_delta=False):
+    """rho of a genuine drift pattern, for the reference line.
+
+    The ceiling is strongly delta-dependent (-0.006 at delta=2, +0.015 at 4,
+    +0.153 at 6), so a single max-over-delta line makes the small-delta points
+    look far better than they are. When sweeping delta, return the per-delta
+    curve instead.
+    """
     import json
     p = os.path.join(root, "reference_ceiling.json")
-    if os.path.isfile(p):
-        try:
-            return json.load(open(p)).get("ceiling")
-        except Exception:
-            return None
-    return None
+    if not os.path.isfile(p):
+        return None
+    try:
+        d = json.load(open(p))
+    except Exception:
+        return None
+    if not by_delta:
+        return d.get("ceiling")
+    return {float(k): v["drift_cw"] for k, v in d.get("by_delta", {}).items()}
 
 
-def fig_gallery(root, exp, out, device, n=8):
-    rs = [m for m in _runs(root, exp) if m.get("method") == "driftdream"][:n]
+def fig_gallery(root, exp, out, device, n=8, method="driftdream"):
+    rs = [m for m in _runs(root, exp) if m.get("method") == method][:n]
     if not rs:
         return None
     imgs, flows, titles, mask = [], [], [], None
@@ -96,10 +104,20 @@ def fig_jitter(root, exp, out_dir):  # noqa: C901
         series = {mk: [st.mean(d[x]) if d.get(x) else float("nan") for x in xs]
                   for mk, d in buck.items()}
         sub = ", ".join(f"{o.split('.')[-1]}={v}" for o, v in fixed.items())
+        hl = _ceiling(root)
+        if key == "fixation.delta_px":
+            # Per-delta ceiling as its own series: the reference illusion is
+            # near zero at delta=2 and only strong at delta=6, so a flat line
+            # would flatter the small-delta points enormously.
+            per = _ceiling(root, by_delta=True)
+            if per:
+                series["real illusion (per delta)"] = [per.get(float(x), float("nan"))
+                                                      for x in xs]
+                hl = None
         made.append(curve(xs, series, xlabel, "rho", os.path.join(out_dir, fname),
                           title="H2: jitter is required"
                                 + (f"  ({sub} held fixed)" if sub else ""),
-                          hline=_ceiling(root)))
+                          hline=hl))
     return made
 
 
@@ -148,12 +166,16 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--which", nargs="*",
                     default=["gallery", "jitter", "controls", "methods"])
+    ap.add_argument("--gallery-method", default="driftdream",
+                    help="which arm to render, e.g. bandlimit")
     a = ap.parse_args()
     dev = resolve_device(a.device)
     os.makedirs(a.out, exist_ok=True)
     made = []
     if "gallery" in a.which:
-        made.append(fig_gallery(a.results_root, a.exp, f"{a.out}/fig2_gallery.png", dev))
+        made.append(fig_gallery(a.results_root, a.exp,
+                                f"{a.out}/fig2_gallery_{a.gallery_method}.png",
+                                dev, method=a.gallery_method))
     if "jitter" in a.which:
         made += fig_jitter(a.results_root, a.exp, a.out) or []
     if "controls" in a.which:
