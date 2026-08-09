@@ -30,11 +30,17 @@ class SDXLGenerator(Generator):
 
     def __init__(self, device: str = "cuda", model_id: str = MODEL_ID,
                  steps: int = 50, cfg_scale: float = 6.0, size: int = 1024,
+                 out_size: int = 0,
                  guide_from: float = 0.25, guide_to: float = 0.85,
                  guide_every: int = 2, guide_lr: float = 6.0,
                  grad_clip: float = 1.0, dtype=torch.float16):
         self.device, self.model_id, self.dtype = device, model_id, dtype
         self.steps, self.cfg_scale, self.size = int(steps), float(cfg_scale), int(size)
+        # SDXL generates at 1024 but the objective (target field, mask, probe
+        # jitter magnitude) is defined at image_size. Without this resize the
+        # guidance hook compares a 1024 image against a 256 target and raises
+        # "size of tensor a (1024) must match tensor b (256)".
+        self.out_size = int(out_size) or self.size
         self.guide_from, self.guide_to = float(guide_from), float(guide_to)
         self.guide_every, self.guide_lr = int(guide_every), float(guide_lr)
         self.grad_clip = float(grad_clip)
@@ -57,7 +63,11 @@ class SDXLGenerator(Generator):
     def _decode(self, lat):
         pipe = self._pipe
         img = pipe.vae.decode(lat / pipe.vae.config.scaling_factor).sample
-        return (img / 2 + 0.5).clamp(0, 1)[0]
+        img = (img / 2 + 0.5).clamp(0, 1)
+        if self.out_size != self.size:
+            img = torch.nn.functional.interpolate(
+                img, size=(self.out_size, self.out_size), mode="area")
+        return img[0]
 
     @torch.no_grad()
     def _embed(self, pipe, prompt):
