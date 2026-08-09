@@ -54,6 +54,12 @@ class SDXLGenerator(Generator):
                 use_safetensors=True)
             pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
             pipe = pipe.to(self.device)
+            # SDXL's VAE overflows in fp16 and emits NaN, which poisons the
+            # decoded image, the guidance gradient and every downstream metric
+            # (symptom: rho_loop=nan and "invalid value encountered in cast"
+            # when saving). Keep the VAE in fp32; it is a small fraction of the
+            # runtime and the UNet stays in fp16.
+            pipe.vae.to(dtype=torch.float32)
             pipe.vae.requires_grad_(False)
             pipe.unet.requires_grad_(False)
             pipe.set_progress_bar_config(disable=True)
@@ -62,6 +68,7 @@ class SDXLGenerator(Generator):
 
     def _decode(self, lat):
         pipe = self._pipe
+        lat = lat.to(torch.float32)                     # VAE is fp32; see _load
         img = pipe.vae.decode(lat / pipe.vae.config.scaling_factor).sample
         img = (img / 2 + 0.5).clamp(0, 1)
         if self.out_size != self.size:
@@ -111,7 +118,15 @@ class SDXLGenerator(Generator):
                 x0 = (lat - (1 - a).sqrt() * noise) / a.sqrt()
                 img = self._decode(x0.to(self.dtype)).float()
                 loss, info = hook(img, i)
+                if not torch.isfinite(loss):
+                    # Skip rather than propagate NaN into the latent, which
+                    # would silently ruin every remaining step and the metrics.
+                    lat = lat.detach().to(self.dtype)
+                    continue
                 grad, = torch.autograd.grad(loss, lat)
+                if not torch.isfinite(grad).all():
+                    lat = lat.detach().to(self.dtype)
+                    continue
                 if self.grad_clip > 0:
                     n = grad.norm()
                     if float(n) > self.grad_clip:
@@ -126,4 +141,8 @@ class SDXLGenerator(Generator):
 
         with torch.no_grad():
             img = self._decode(lat.to(self.dtype)).float()
+        if not torch.isfinite(img).all():
+            raise RuntimeError(
+                "SDXL produced a non-finite image. Usual cause is fp16 VAE "
+                "overflow; check that pipe.vae is fp32, or lower guide_lr.")
         return img.detach().cpu(), trace
