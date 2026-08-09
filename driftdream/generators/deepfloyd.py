@@ -28,13 +28,14 @@ class DeepFloydGenerator(Generator):
                  cfg_scale: float = 7.0, guide_from: float = 0.2,
                  guide_to: float = 0.9, guide_every: int = 1,
                  guide_lr: float = 2.0, grad_clip: float = 1.0,
-                 dtype=torch.float16):
+                 out_size: int = 0, dtype=torch.float16):
         assert stage in self.stages, f"stage must be one of {self.stages}"
         self.device, self.stage, self.dtype = device, stage, dtype
         self.steps, self.cfg_scale = int(steps), float(cfg_scale)
         self.guide_from, self.guide_to = float(guide_from), float(guide_to)
         self.guide_every, self.guide_lr = int(guide_every), float(guide_lr)
         self.grad_clip = float(grad_clip)
+        self.out_size = int(out_size)
         self._s1 = self._s2 = None
 
     def _load(self):
