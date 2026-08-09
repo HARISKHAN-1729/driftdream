@@ -33,6 +33,11 @@ def run_one(cfg, prompt, seed, device=None):
     else:
         img, trace = gen.sample(prompt, seed=seed, hook=None)
     img = img.to(device)
+    if not torch.isfinite(img).all():
+        # A NaN image yields NaN metrics and a corrupt PNG. Better to record
+        # the failure than to fill the results tree with silent garbage.
+        raise RuntimeError("generator returned a non-finite image; refusing "
+                           "to record NaN metrics")
     m = {f"{k}_loop": v for k, v in obj.measure(img).items()}
 
     # Held-out PROBE ensemble: fixed, large, different seed, never optimised
