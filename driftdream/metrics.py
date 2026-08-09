@@ -44,21 +44,47 @@ def endpoint_error(f: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
     return (f - gt.to(f.device, f.dtype)).pow(2).sum(0).sqrt().mean()
 
 
+#: Process-wide CLIP cache. Rebuilding the scorer per sweep cell reloads ~1.7 GB
+#: of weights every time and dominated the wall clock.
+_CLIP_CACHE: dict = {}
+
+
+def _as_tensor(out):
+    """get_image_features/get_text_features return a plain tensor on some
+    transformers versions and a ModelOutput on others. Handle both rather than
+    pinning a version: the ModelOutput path raised
+    'cosine_similarity(): argument x1 must be Tensor, not
+    BaseModelOutputWithPooling' on every cell."""
+    if isinstance(out, torch.Tensor):
+        return out
+    for attr in ("image_embeds", "text_embeds", "pooler_output", "last_hidden_state"):
+        v = getattr(out, attr, None)
+        if isinstance(v, torch.Tensor):
+            return v.mean(1) if v.dim() == 3 else v
+    if isinstance(out, (tuple, list)) and isinstance(out[0], torch.Tensor):
+        return out[0]
+    raise TypeError(f"cannot extract features from {type(out).__name__}")
+
+
 class ContentScorer:
     """CLIP / DINO prompt- and identity-alignment. Lazy, optional, cached."""
 
     def __init__(self, clip_name: str = "openai/clip-vit-large-patch14",
                  device: str = "cpu", enabled: bool = True):
-        self.device, self.enabled, self.clip_name = device, enabled, clip_name
+        self.device, self.enabled = device, enabled
+        self.clip_name = clip_name or "openai/clip-vit-large-patch14"
         self._clip = self._proc = None
 
     def _load(self):
         if self._clip is None:
-            from transformers import CLIPModel, CLIPProcessor
-            self._clip = CLIPModel.from_pretrained(self.clip_name).to(self.device).eval()
-            for p in self._clip.parameters():
-                p.requires_grad_(False)
-            self._proc = CLIPProcessor.from_pretrained(self.clip_name)
+            key = (self.clip_name, str(self.device))
+            if key not in _CLIP_CACHE:
+                from transformers import CLIPModel, CLIPProcessor
+                m = CLIPModel.from_pretrained(self.clip_name).to(self.device).eval()
+                for p in m.parameters():
+                    p.requires_grad_(False)
+                _CLIP_CACHE[key] = (m, CLIPProcessor.from_pretrained(self.clip_name))
+            self._clip, self._proc = _CLIP_CACHE[key]
         return self._clip, self._proc
 
     def score(self, x: torch.Tensor, prompt: str) -> torch.Tensor:
@@ -73,6 +99,6 @@ class ContentScorer:
                             align_corners=False)
         img = (img - mean) / std
         tok = proc(text=[prompt], return_tensors="pt", padding=True).to(self.device)
-        ie = clip.get_image_features(pixel_values=img)
-        te = clip.get_text_features(**tok)
+        ie = _as_tensor(clip.get_image_features(pixel_values=img))
+        te = _as_tensor(clip.get_text_features(**tok))
         return F.cosine_similarity(ie, te).squeeze()
